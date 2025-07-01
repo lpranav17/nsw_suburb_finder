@@ -1,0 +1,97 @@
+# Database Configuration
+database:
+  host: localhost
+  port: 5432
+  name: nsw_open_data
+  user: postgres
+  password: 240573
+  pool_size: 20
+  max_overflow: 30
+
+# API Configuration
+api:
+  host: 0.0.0.0
+  port: 8000
+  debug: true
+  title: "NSW Open Data API"
+  version: "1.0.0"
+
+# NSW Open Data Sources
+data_sources:
+  planning_portal:
+    base_url: "https://www.planningportal.nsw.gov.au/opendata"
+    endpoints:
+      development_applications: "/api/development-applications"
+      zoning_data: "/api/zoning"
+      property_info: "/api/property"
+  
+  transport_nsw:
+    base_url: "https://opendata.transport.nsw.gov.au"
+    endpoints:
+      routes: "/api/routes"
+      timetables: "/api/timetables"
+      stops: "/api/stops"
+      accessibility: "/api/accessibility"
+  
+  crime_statistics:
+    base_url: "https://www.bocsar.nsw.gov.au"
+    endpoints:
+      crime_data: "/Pages/bocsar_data_downloads.aspx"
+      statistics: "/api/statistics"
+  
+  education:
+    base_url: "https://data.cese.nsw.gov.au"
+    endpoints:
+      school_performance: "/api/schools/performance"
+      enrollment: "/api/schools/enrollment"
+      facilities: "/api/schools/facilities"
+  
+  health:
+    base_url: "https://www.health.nsw.gov.au/opendata"
+    endpoints:
+      facilities: "/api/facilities"
+      services: "/api/services"
+      accessibility: "/api/accessibility"
+  
+  environment:
+    base_url: "https://www.environment.nsw.gov.au/opendata"
+    endpoints:
+      parks: "/api/parks"
+      recreation: "/api/recreation"
+      environmental_factors: "/api/environmental"
+
+# Data Collection Settings
+data_collection:
+  batch_size: 1000
+  max_retries: 3
+  retry_delay: 5
+  timeout: 30
+  
+  # Collection Schedule (in minutes)
+  schedule:
+    property_data: 1440  # Daily
+    transport_data: 60   # Hourly
+    crime_data: 10080    # Weekly
+    education_data: 10080 # Weekly
+    health_data: 43200   # Monthly
+    environment_data: 43200 # Monthly
+
+# Storage Settings
+storage:
+  raw_data_path: "./data/raw"
+  processed_data_path: "./data/processed"
+  backup_path: "./data/backup"
+  max_file_size: 100MB
+
+# Logging
+logging:
+  level: INFO
+  file: "./logs/app.log"
+  max_size: 10MB
+  backup_count: 5
+
+# Security
+security:
+  secret_key: "your-secret-key-here"
+  algorithm: "HS256"
+  access_token_expire_minutes: 30 
