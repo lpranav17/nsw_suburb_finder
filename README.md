@@ -272,27 +272,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - PostgreSQL and PostGIS communities
 - FastAPI and Python communities
 
-## 📞 Support
-
-For questions or support, please open an issue on GitHub or contact the development team.
-
-## 📊 Current Status
-
-✅ **Completed:**
-- POI data collection from NSW API
-- Database setup with PostgreSQL/PostGIS
-- SA4 region analysis
-- Web application with FastAPI
-- Interactive preference-based recommendations
-- 8,669 POIs across 12 SA4 regions
-
-🔄 **In Progress:**
-- Additional data source integration
-- Advanced analytics features
-- Performance optimization
-
-📋 **Planned:**
-- Interactive maps
-- Mobile application
-- Real-time data updates
-- User account system 
+📋 **Copyrights**
+- To be added in here...
