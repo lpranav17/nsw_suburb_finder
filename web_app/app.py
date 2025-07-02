@@ -45,6 +45,9 @@ class PreferenceWeights(BaseModel):
     transport: float = 0.25
     education: float = 0.15
     utility: float = 0.10
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    radius_km: Optional[float] = 5.0
 
 class SuburbRecommendation(BaseModel):
     suburb_name: str
@@ -53,6 +56,7 @@ class SuburbRecommendation(BaseModel):
     total_pois: int
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    distance_km: Optional[float] = None
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -173,6 +177,34 @@ async def root():
                 Find the best suburb in Sydney based on your preferences for amenities and facilities
             </p>
             
+            <div class="location-section">
+                <h3>📍 Choose Your Location</h3>
+                <div class="map-container">
+                    <div id="map" style="height: 300px; width: 100%; border-radius: 8px; margin-bottom: 15px;"></div>
+                    <div class="location-controls">
+                        <input type="text" id="location-search" placeholder="Search for a location..." style="width: 70%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-right: 10px;">
+                        <button onclick="searchLocation()" style="padding: 10px 15px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer;">Search</button>
+                        <button onclick="useCurrentLocation()" style="padding: 10px 15px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px;">Use My Location</button>
+                    </div>
+                    <div id="selected-location" style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px; display: none;">
+                        <strong>Selected:</strong> <span id="location-text"></span>
+                        <br><strong>Radius:</strong> <span id="radius-text">5 km</span>
+                        <button onclick="clearLocation()" style="float: right; padding: 5px 10px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer;">Clear</button>
+                    </div>
+                    <div id="radius-selector" style="margin-top: 15px; display: none;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: bold;">Search Radius: <span id="radius-value">5</span> km</label>
+                        <input type="range" id="radius-slider" min="1" max="20" value="5" style="width: 100%; margin-bottom: 5px;" oninput="updateRadius()">
+                        <div style="display: flex; justify-content: space-between; font-size: 12px; color: #7f8c8d;">
+                            <span>1 km</span>
+                            <span>5 km</span>
+                            <span>10 km</span>
+                            <span>15 km</span>
+                            <span>20 km</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
             <div class="preferences">
                 <div class="preference-group">
                     <h3>🎾 Recreation & Sports</h3>
@@ -223,11 +255,120 @@ async def root():
         </div>
 
         <script>
+            let map, marker, circle;
+            let selectedLocation = null;
+            let currentRadius = 5; // Default radius in km
+            
+            // Initialize OpenStreetMap with Leaflet
+            function initMap() {
+                // Sydney coordinates
+                const sydney = [-33.8688, 151.2093];
+                
+                map = L.map('map').setView(sydney, 10);
+                
+                // Add OpenStreetMap tiles
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(map);
+                
+                // Add click listener to map
+                map.on('click', function(event) {
+                    placeMarker(event.latlng);
+                });
+            }
+            
+            function placeMarker(location) {
+                // Remove existing marker and circle
+                if (marker) {
+                    map.removeLayer(marker);
+                }
+                if (circle) {
+                    map.removeLayer(circle);
+                }
+                
+                // Add new marker
+                marker = L.marker(location).addTo(map);
+                
+                // Add circle with current radius
+                circle = L.circle(location, {
+                    color: 'red',
+                    fillColor: '#f03',
+                    fillOpacity: 0.3,
+                    radius: currentRadius * 1000 // Convert km to meters
+                }).addTo(map);
+                
+                selectedLocation = {
+                    lat: location.lat,
+                    lng: location.lng
+                };
+                
+                // Update display
+                document.getElementById('selected-location').style.display = 'block';
+                document.getElementById('radius-selector').style.display = 'block';
+                document.getElementById('location-text').textContent = `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`;
+                document.getElementById('radius-text').textContent = `${currentRadius} km`;
+                
+                // Center map on marker
+                map.setView(location);
+            }
+            
+            function searchLocation() {
+                const address = document.getElementById('location-search').value;
+                
+                // Use Nominatim (OpenStreetMap's geocoding service)
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.length > 0) {
+                            const location = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+                            placeMarker(location);
+                            document.getElementById('location-text').textContent = data[0].display_name;
+                        } else {
+                            alert('Location not found. Please try a different search term.');
+                        }
+                    })
+                    .catch(error => {
+                        alert('Error searching for location. Please try again.');
+                    });
+            }
+            
+            function useCurrentLocation() {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        function(position) {
+                            const location = [position.coords.latitude, position.coords.longitude];
+                            placeMarker(location);
+                            document.getElementById('location-text').textContent = 'Your current location';
+                        },
+                        function() {
+                            alert('Unable to get your location. Please select manually.');
+                        }
+                    );
+                } else {
+                    alert('Geolocation is not supported by this browser.');
+                }
+            }
+            
+            function updateRadius() {
+                const slider = document.getElementById('radius-slider');
+                currentRadius = parseInt(slider.value);
+                document.getElementById('radius-value').textContent = currentRadius;
+                document.getElementById('radius-text').textContent = `${currentRadius} km`;
+                if (selectedLocation) {
+                    placeMarker(selectedLocation);
+                }
+            }
+            
             function updateValue(category) {
                 const slider = document.getElementById(category);
                 const display = document.getElementById(category + '-value');
                 display.textContent = slider.value + '%';
             }
+            
+            // Initialize map when page loads
+            window.onload = function() {
+                initMap();
+            };
             
             async function getRecommendations() {
                 const loading = document.getElementById('loading');
@@ -242,7 +383,10 @@ async def root():
                     community: parseInt(document.getElementById('community').value) / 100,
                     transport: parseInt(document.getElementById('transport').value) / 100,
                     education: parseInt(document.getElementById('education').value) / 100,
-                    utility: parseInt(document.getElementById('utility').value) / 100
+                    utility: parseInt(document.getElementById('utility').value) / 100,
+                    latitude: selectedLocation ? selectedLocation.lat : null,
+                    longitude: selectedLocation ? selectedLocation.lng : null,
+                    radius_km: currentRadius
                 };
                 
                 try {
@@ -261,9 +405,11 @@ async def root():
                     
                     let html = '';
                     data.forEach((suburb, index) => {
+                        const distanceInfo = suburb.distance_km ? `<div style="color: #7f8c8d; font-size: 14px; margin-bottom: 10px;">📍 ${suburb.distance_km.toFixed(1)} km away</div>` : '';
                         html += `
                             <div class="suburb-card">
                                 <div class="suburb-name">${index + 1}. ${suburb.suburb_name}</div>
+                                ${distanceInfo}
                                 <div class="suburb-score">Score: ${(suburb.score * 100).toFixed(1)}%</div>
                                 <div class="poi-breakdown">
                                     <div class="poi-category">
@@ -293,7 +439,24 @@ async def root():
                     alert('Error getting recommendations: ' + error.message);
                 }
             }
+            
+            function clearLocation() {
+                if (marker) {
+                    map.removeLayer(marker);
+                }
+                if (circle) {
+                    map.removeLayer(circle);
+                }
+                selectedLocation = null;
+                document.getElementById('selected-location').style.display = 'none';
+                document.getElementById('radius-selector').style.display = 'none';
+                document.getElementById('location-search').value = '';
+            }
         </script>
+        
+        <!-- Leaflet CSS and JS (OpenStreetMap) -->
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     </body>
     </html>
     """
@@ -304,24 +467,56 @@ async def get_recommendations(preferences: PreferenceWeights):
     """Get suburb recommendations based on user preferences"""
     
     try:
-        # Query POI data grouped by SA4 regions (matching your database structure)
-        query = """
-            SELECT 
-                sa4_name,
-                COUNT(*) as total_pois,
-                COUNT(CASE WHEN group_name = 'Recreation' THEN 1 END) as recreation_count,
-                COUNT(CASE WHEN group_name = 'Community' THEN 1 END) as community_count,
-                COUNT(CASE WHEN group_name = 'Transport' THEN 1 END) as transport_count,
-                COUNT(CASE WHEN group_name = 'Education' THEN 1 END) as education_count,
-                COUNT(CASE WHEN group_name = 'Utility' THEN 1 END) as utility_count,
-                AVG(latitude) as avg_lat,
-                AVG(longitude) as avg_lon
-            FROM poi_data 
-            WHERE sa4_name IS NOT NULL
-            GROUP BY sa4_name
-            HAVING COUNT(*) >= 20
-            ORDER BY total_pois DESC
-        """
+        # Build query based on location filter
+        if preferences.latitude and preferences.longitude:
+            # Location-based filtering with 5km radius
+            radius_km = preferences.radius_km or 5.0
+            query = f"""
+                SELECT 
+                    sa4_name,
+                    COUNT(*) as total_pois,
+                    COUNT(CASE WHEN group_name = 'Recreation' THEN 1 END) as recreation_count,
+                    COUNT(CASE WHEN group_name = 'Community' THEN 1 END) as community_count,
+                    COUNT(CASE WHEN group_name = 'Transport' THEN 1 END) as transport_count,
+                    COUNT(CASE WHEN group_name = 'Education' THEN 1 END) as education_count,
+                    COUNT(CASE WHEN group_name = 'Utility' THEN 1 END) as utility_count,
+                    AVG(latitude) as avg_lat,
+                    AVG(longitude) as avg_lon,
+                    MIN(ST_Distance(
+                        geom::geography, 
+                        ST_SetSRID(ST_MakePoint({preferences.longitude}, {preferences.latitude}), 4326)::geography
+                    ) / 1000) as distance_km
+                FROM poi_data 
+                WHERE sa4_name IS NOT NULL
+                AND ST_DWithin(
+                    geom::geography, 
+                    ST_SetSRID(ST_MakePoint({preferences.longitude}, {preferences.latitude}), 4326)::geography, 
+                    {radius_km * 1000}
+                )
+                GROUP BY sa4_name
+                HAVING COUNT(*) >= 10
+                ORDER BY distance_km ASC, total_pois DESC
+            """
+        else:
+            # Original query without location filter
+            query = """
+                SELECT 
+                    sa4_name,
+                    COUNT(*) as total_pois,
+                    COUNT(CASE WHEN group_name = 'Recreation' THEN 1 END) as recreation_count,
+                    COUNT(CASE WHEN group_name = 'Community' THEN 1 END) as community_count,
+                    COUNT(CASE WHEN group_name = 'Transport' THEN 1 END) as transport_count,
+                    COUNT(CASE WHEN group_name = 'Education' THEN 1 END) as education_count,
+                    COUNT(CASE WHEN group_name = 'Utility' THEN 1 END) as utility_count,
+                    AVG(latitude) as avg_lat,
+                    AVG(longitude) as avg_lon,
+                    NULL as distance_km
+                FROM poi_data 
+                WHERE sa4_name IS NOT NULL
+                GROUP BY sa4_name
+                HAVING COUNT(*) >= 20
+                ORDER BY total_pois DESC
+            """
         
         df = pd.read_sql(query, engine)
         
@@ -360,7 +555,8 @@ async def get_recommendations(preferences: PreferenceWeights):
                 },
                 total_pois=int(row['total_pois']),
                 latitude=float(row['avg_lat']) if pd.notna(row['avg_lat']) else None,
-                longitude=float(row['avg_lon']) if pd.notna(row['avg_lon']) else None
+                longitude=float(row['avg_lon']) if pd.notna(row['avg_lon']) else None,
+                distance_km=float(row['distance_km']) if pd.notna(row['distance_km']) else None
             ))
         
         # Sort by score and return top 10
