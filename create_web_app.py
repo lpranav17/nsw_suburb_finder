@@ -4,6 +4,7 @@ Create a FastAPI web application for Sydney suburb recommendations
 """
 
 import os
+
 import sys
 from pathlib import Path
 
