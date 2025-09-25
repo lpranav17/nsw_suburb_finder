@@ -38,9 +38,13 @@ def collect_pois_by_sa4():
     with open('config/config.yaml', 'r') as f:
         config = yaml.safe_load(f)
     
-    # Setup database connection
-    db_config = config.get('database', {})
-    db_url = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['name']}"
+    # Setup database connection (prefer DATABASE_URL env var for cloud providers like Neon)
+    database_url_env = os.getenv('DATABASE_URL')
+    if database_url_env and database_url_env.strip():
+        db_url = database_url_env
+    else:
+        db_config = config.get('database', {})
+        db_url = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['name']}"
     engine = create_engine(db_url, echo=False)
     
     # Enable PostGIS
