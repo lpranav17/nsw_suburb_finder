@@ -210,6 +210,7 @@ export default function Home() {
             <MapSelector
               latitude={latitude}
               longitude={longitude}
+              radiusKm={radiusKm}
               onLocationSelect={(lat, lng) => {
                 setLatitude(lat.toFixed(6));
                 setLongitude(lng.toFixed(6));

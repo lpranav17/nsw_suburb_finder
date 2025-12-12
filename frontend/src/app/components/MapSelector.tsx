@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -77,8 +77,8 @@ export default function MapSelector({ latitude, longitude, onLocationSelect }: M
         style={{ height: "100%", width: "100%" }}
         scrollWheelZoom={true}
         maxBounds={L.latLngBounds(
-          [SYDNEY_BOUNDS[0][0], SYDNEY_BOUNDS[0][1]],
-          [SYDNEY_BOUNDS[1][0], SYDNEY_BOUNDS[1][1]]
+          SYDNEY_BOUNDS[0] as L.LatLngExpression,
+          SYDNEY_BOUNDS[1] as L.LatLngExpression
         )}
         maxBoundsViscosity={1.0}
       >
