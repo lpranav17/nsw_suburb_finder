@@ -17,7 +17,7 @@ if (typeof window !== "undefined") {
 }
 
 // Sydney bounds (Greater Sydney area)
-const SYDNEY_BOUNDS: L.LatLngBoundsExpression = [
+const SYDNEY_BOUNDS: [[number, number], [number, number]] = [
   [-34.2, 150.5], // Southwest
   [-33.6, 151.4], // Northeast
 ];
