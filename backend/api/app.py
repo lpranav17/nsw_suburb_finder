@@ -15,14 +15,6 @@ import pandas as pd
 import json
 import os
 
-# Import NL query router (optional - only if OpenAI is configured)
-try:
-    from api.routes.nl_query import router as nl_query_router
-    NL_QUERY_AVAILABLE = True
-except ImportError:
-    NL_QUERY_AVAILABLE = False
-    nl_query_router = None
-
 # Load configuration
 from pathlib import Path
 config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
