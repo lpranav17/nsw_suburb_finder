@@ -1,6 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+
+// Dynamically import map to avoid SSR issues
+const MapSelector = dynamic(() => import("./components/MapSelector"), {
+  ssr: false,
+  loading: () => <div style={{ height: "400px", display: "flex", alignItems: "center", justifyContent: "center", background: "#f0f0f0", borderRadius: "8px" }}>Loading map...</div>,
+});
 
 type PoiCounts = Partial<{
   recreation: number;
@@ -198,6 +205,19 @@ export default function Home() {
             <button className="btn-secondary" onClick={handleGeoLocate} type="button">
               Use my location
             </button>
+          </div>
+          <div style={{ marginTop: "12px" }}>
+            <MapSelector
+              latitude={latitude}
+              longitude={longitude}
+              onLocationSelect={(lat, lng) => {
+                setLatitude(lat.toFixed(6));
+                setLongitude(lng.toFixed(6));
+              }}
+            />
+            <small style={{ display: "block", marginTop: "8px", color: "#666" }}>
+              Click on the map or drag the marker to select a location in Sydney
+            </small>
           </div>
           <div className="slider-row">
             <label>

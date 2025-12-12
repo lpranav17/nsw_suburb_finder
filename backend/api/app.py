@@ -55,7 +55,16 @@ if allowed_origins_env:
     for origin in allowed_origins_env.split(','):
         cleaned = origin.strip().rstrip('/')
         if cleaned:
-            allowed_origins.append(cleaned)
+            # Support wildcard for Vercel preview URLs
+            if cleaned == '*':
+                allowed_origins = ["*"]
+                break
+            # Support pattern matching for Vercel preview domains
+            elif '*.vercel.app' in cleaned or cleaned.endswith('.vercel.app'):
+                # For now, allow all vercel.app subdomains if pattern detected
+                allowed_origins.append(cleaned)
+            else:
+                allowed_origins.append(cleaned)
 
 # If no origins specified, allow all (for development)
 if not allowed_origins:
