@@ -83,7 +83,15 @@ export default function Home() {
 
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error(`API ${res.status}: ${txt}`);
+        let errorMsg = `API ${res.status}: ${txt}`;
+        if (res.status === 0 || res.status === 404) {
+          errorMsg = `Cannot connect to API. Check that NEXT_PUBLIC_API_URL is set correctly. Current: ${apiBase || 'NOT SET'}`;
+        } else if (res.status === 500) {
+          errorMsg = `Server error: ${txt}. Check Railway logs.`;
+        } else if (res.status === 403 || res.status === 401) {
+          errorMsg = `CORS or authentication error. Check ALLOWED_ORIGINS in Railway.`;
+        }
+        throw new Error(errorMsg);
       }
 
       const data = (await res.json()) as Recommendation[];

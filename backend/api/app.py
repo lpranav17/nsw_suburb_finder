@@ -47,22 +47,34 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Add CORS middleware FIRST (before routes) - this handles OPTIONS automatically
+allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '')
+# Clean up origins: remove trailing slashes and whitespace
+allowed_origins = []
+if allowed_origins_env:
+    for origin in allowed_origins_env.split(','):
+        cleaned = origin.strip().rstrip('/')
+        if cleaned:
+            allowed_origins.append(cleaned)
+
+# If no origins specified, allow all (for development)
+if not allowed_origins:
+    allowed_origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
 # Health check endpoint for Railway
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Railway"""
     return {"status": "ok", "service": "nsw-suburb-finder-backend"}
-
-# Add CORS middleware (configurable)
-allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '')
-allowed_origins = [o.strip() for o in allowed_origins_env.split(',') if o.strip()] or ["*"]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # NL query router removed - keeping basic structure
 
@@ -335,8 +347,16 @@ async def get_recommendations(preferences: PreferenceWeights):
     """Get suburb recommendations based on user preferences"""
     
     try:
+        if engine is None:
+            raise HTTPException(status_code=503, detail="Database connection not available")
+        
         # Choose query based on whether location filter is provided
-        if preferences.latitude is not None and preferences.longitude is not None:
+        # Only use location filter if valid coordinates are provided (not 0,0 and within reasonable bounds)
+        use_location = (preferences.latitude is not None and preferences.longitude is not None 
+                       and preferences.latitude != 0 and preferences.longitude != 0
+                       and -90 <= preferences.latitude <= 90 and -180 <= preferences.longitude <= 180)
+        
+        if use_location:
             radius_km = preferences.radius_km or 5.0
             query = f"""
                 SELECT 
@@ -431,8 +451,15 @@ async def get_recommendations(preferences: PreferenceWeights):
         recommendations.sort(key=lambda x: x.score, reverse=True)
         return recommendations[:10]
         
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting recommendations: {str(e)}")
+        import traceback
+        error_details = str(e) if str(e) else repr(e)
+        traceback_str = traceback.format_exc()
+        print(f"Error in get_recommendations: {error_details}")
+        print(f"Traceback: {traceback_str}")
+        raise HTTPException(status_code=500, detail=f"Error getting recommendations: {error_details}")
 
 @app.get("/api/stats")
 async def get_stats():
