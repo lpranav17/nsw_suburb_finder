@@ -18,8 +18,10 @@ import os
 # Load configuration
 from pathlib import Path
 config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
-with open(config_path, 'r') as f:
-    config = yaml.safe_load(f)
+config = {}
+if config_path.exists():
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f) or {}
 
 # Setup database connection (env var takes precedence)
 database_url_env = os.getenv('DATABASE_URL')
@@ -36,6 +38,12 @@ app = FastAPI(
     description="Find the best suburb in Sydney based on your preferences",
     version="1.0.0"
 )
+
+# Health check endpoint for Railway
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Railway"""
+    return {"status": "ok", "service": "nsw-suburb-finder-backend"}
 
 # Add CORS middleware (configurable)
 allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '')
