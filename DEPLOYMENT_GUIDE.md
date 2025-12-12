@@ -31,8 +31,8 @@
 ### 2.2 Deploy Backend
 1. Click "New Project" → "Deploy from GitHub repo"
 2. Select your `nsw_suburb_finder` repository
-3. Railway will auto-detebackendct it's a Python project
-4. Set root directory: ``
+3. Railway will auto-detect it's a Python project
+4. Set root directory: `backend`
 5. Railway will use `railway.json` config
 
 ### 2.3 Configure Environment Variables
