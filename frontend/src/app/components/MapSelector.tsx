@@ -25,14 +25,18 @@ const SYDNEY_BOUNDS: [[number, number], [number, number]] = [
 const SYDNEY_CENTER: [number, number] = [-33.8688, 151.2093]; // Sydney CBD
 
 interface MapBoundsControllerProps {
-  bounds: L.LatLngBoundsExpression;
+  bounds: [[number, number], [number, number]];
 }
 
 function MapBoundsController({ bounds }: MapBoundsControllerProps) {
   const map = useMap();
   
   useEffect(() => {
-    map.setMaxBounds(bounds);
+    const boundsObj = L.latLngBounds(
+      bounds[0] as L.LatLngExpression,
+      bounds[1] as L.LatLngExpression
+    );
+    map.setMaxBounds(boundsObj);
     map.setView(SYDNEY_CENTER, 11);
   }, [map, bounds]);
 
@@ -51,7 +55,10 @@ export default function MapSelector({ latitude, longitude, onLocationSelect }: M
   const handleMapClick = (e: L.LeafletMouseEvent) => {
     const { lat, lng } = e.latlng;
     // Ensure coordinates are within Sydney bounds
-    const bounds = L.latLngBounds(SYDNEY_BOUNDS);
+    const bounds = L.latLngBounds(
+      SYDNEY_BOUNDS[0] as L.LatLngExpression,
+      SYDNEY_BOUNDS[1] as L.LatLngExpression
+    );
     if (bounds.contains([lat, lng])) {
       onLocationSelect(lat, lng);
     }
@@ -69,7 +76,10 @@ export default function MapSelector({ latitude, longitude, onLocationSelect }: M
         zoom={currentPosition ? 13 : 11}
         style={{ height: "100%", width: "100%" }}
         scrollWheelZoom={true}
-        maxBounds={SYDNEY_BOUNDS}
+        maxBounds={L.latLngBounds(
+          [SYDNEY_BOUNDS[0][0], SYDNEY_BOUNDS[0][1]],
+          [SYDNEY_BOUNDS[1][0], SYDNEY_BOUNDS[1][1]]
+        )}
         maxBoundsViscosity={1.0}
       >
         <MapBoundsController bounds={SYDNEY_BOUNDS} />
