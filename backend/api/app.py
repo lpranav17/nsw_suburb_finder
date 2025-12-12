@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
 """
-Create a FastAPI web application for Sydney suburb recommendations
-"""
-
-import os
-
-import sys
-from pathlib import Path
-
-# Add src to path
-sys.path.append(str(Path(__file__).parent / "src"))
-
-def create_web_app():
-    """Create the FastAPI web application files"""
-    
-    # Create web app directory
-    web_dir = Path("web_app")
-    web_dir.mkdir(exist_ok=True)
-    
-    # Create main FastAPI app
-    app_content = '''#!/usr/bin/env python3
-"""
 Sydney Suburb Recommender - FastAPI Web Application
 """
 
@@ -34,14 +13,22 @@ import yaml
 from sqlalchemy import create_engine, text
 import pandas as pd
 import json
+import os
 
 # Load configuration
-with open('../config/config.yaml', 'r') as f:
+from pathlib import Path
+config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
+with open(config_path, 'r') as f:
     config = yaml.safe_load(f)
 
-# Setup database connection
-db_config = config.get('database', {})
-db_url = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['name']}"
+# Setup database connection (env var takes precedence)
+database_url_env = os.getenv('DATABASE_URL')
+if database_url_env and database_url_env.strip():
+    db_url = database_url_env
+else:
+    db_config = config.get('database', {})
+    db_url = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['name']}"
+
 engine = create_engine(db_url, echo=False)
 
 app = FastAPI(
@@ -50,10 +37,12 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware
+# Add CORS middleware (configurable)
+allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '')
+allowed_origins = [o.strip() for o in allowed_origins_env.split(',') if o.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,6 +55,9 @@ class PreferenceWeights(BaseModel):
     transport: float = 0.25
     education: float = 0.15
     utility: float = 0.10
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    radius_km: Optional[float] = 5.0
 
 class SuburbRecommendation(BaseModel):
     suburb_name: str
@@ -325,26 +317,55 @@ async def get_recommendations(preferences: PreferenceWeights):
     """Get suburb recommendations based on user preferences"""
     
     try:
-        # Query POI data grouped by suburb areas
-        query = """
-            SELECT 
-                sa2_name,
-                COUNT(*) as total_pois,
-                COUNT(CASE WHEN group_name = 'Recreation' THEN 1 END) as recreation_count,
-                COUNT(CASE WHEN group_name = 'Community' THEN 1 END) as community_count,
-                COUNT(CASE WHEN group_name = 'Transport' THEN 1 END) as transport_count,
-                COUNT(CASE WHEN group_name = 'Education' THEN 1 END) as education_count,
-                COUNT(CASE WHEN group_name = 'Utility' THEN 1 END) as utility_count,
-                AVG(latitude) as avg_lat,
-                AVG(longitude) as avg_lon
-            FROM poi_data 
-            WHERE sa2_name != 'Greater Sydney'
-            GROUP BY sa2_name
-            HAVING COUNT(*) >= 5
-            ORDER BY total_pois DESC
-            LIMIT 20
-        """
-        
+        # Choose query based on whether location filter is provided
+        if preferences.latitude is not None and preferences.longitude is not None:
+            radius_km = preferences.radius_km or 5.0
+            query = f"""
+                SELECT 
+                    sa4_name,
+                    COUNT(*) as total_pois,
+                    COUNT(CASE WHEN group_name = 'Recreation' THEN 1 END) as recreation_count,
+                    COUNT(CASE WHEN group_name = 'Community' THEN 1 END) as community_count,
+                    COUNT(CASE WHEN group_name = 'Transport' THEN 1 END) as transport_count,
+                    COUNT(CASE WHEN group_name = 'Education' THEN 1 END) as education_count,
+                    COUNT(CASE WHEN group_name = 'Utility' THEN 1 END) as utility_count,
+                    AVG(latitude) as avg_lat,
+                    AVG(longitude) as avg_lon,
+                    MIN(ST_Distance(
+                        geom::geography,
+                        ST_SetSRID(ST_MakePoint({preferences.longitude}, {preferences.latitude}), 4326)::geography
+                    ) / 1000) as distance_km
+                FROM poi_data 
+                WHERE sa4_name IS NOT NULL
+                AND ST_DWithin(
+                    geom::geography,
+                    ST_SetSRID(ST_MakePoint({preferences.longitude}, {preferences.latitude}), 4326)::geography,
+                    {radius_km * 1000}
+                )
+                GROUP BY sa4_name
+                HAVING COUNT(*) >= 10
+                ORDER BY distance_km ASC, total_pois DESC
+            """
+        else:
+            query = """
+                SELECT 
+                    sa4_name,
+                    COUNT(*) as total_pois,
+                    COUNT(CASE WHEN group_name = 'Recreation' THEN 1 END) as recreation_count,
+                    COUNT(CASE WHEN group_name = 'Community' THEN 1 END) as community_count,
+                    COUNT(CASE WHEN group_name = 'Transport' THEN 1 END) as transport_count,
+                    COUNT(CASE WHEN group_name = 'Education' THEN 1 END) as education_count,
+                    COUNT(CASE WHEN group_name = 'Utility' THEN 1 END) as utility_count,
+                    AVG(latitude) as avg_lat,
+                    AVG(longitude) as avg_lon,
+                    NULL as distance_km
+                FROM poi_data 
+                WHERE sa4_name IS NOT NULL
+                GROUP BY sa4_name
+                HAVING COUNT(*) >= 20
+                ORDER BY total_pois DESC
+            """
+
         df = pd.read_sql(query, engine)
         
         if df.empty:
@@ -371,7 +392,7 @@ async def get_recommendations(preferences: PreferenceWeights):
             )
             
             recommendations.append(SuburbRecommendation(
-                suburb_name=row['sa2_name'],
+                suburb_name=row['sa4_name'],
                 score=score,
                 poi_counts={
                     'recreation': int(row['recreation_count']),
@@ -382,7 +403,8 @@ async def get_recommendations(preferences: PreferenceWeights):
                 },
                 total_pois=int(row['total_pois']),
                 latitude=float(row['avg_lat']) if pd.notna(row['avg_lat']) else None,
-                longitude=float(row['avg_lon']) if pd.notna(row['avg_lon']) else None
+                longitude=float(row['avg_lon']) if pd.notna(row['avg_lon']) else None,
+                distance_km=float(row['distance_km']) if 'distance_km' in df.columns and pd.notna(row['distance_km']) else None
             ))
         
         # Sort by score and return top 10
@@ -421,55 +443,3 @@ async def get_stats():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-'''
-    
-    with open(web_dir / "app.py", "w", encoding='utf-8') as f:
-        f.write(app_content)
-    
-    # Create requirements for web app
-    web_requirements = '''fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-sqlalchemy==2.0.23
-psycopg2-binary==2.9.9
-pandas==2.1.4
-pyyaml==6.0.1
-'''
-    
-    with open(web_dir / "requirements.txt", "w", encoding='utf-8') as f:
-        f.write(web_requirements)
-    
-    # Create startup script
-    startup_script = '''#!/usr/bin/env python3
-"""
-Start the Sydney Suburb Recommender web application
-"""
-
-import uvicorn
-from app import app
-
-if __name__ == "__main__":
-    print("🚀 Starting Sydney Suburb Recommender...")
-    print("📱 Open your browser and go to: http://localhost:8000")
-    print("🔧 API documentation: http://localhost:8000/docs")
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
-'''
-    
-    with open(web_dir / "start.py", "w", encoding='utf-8') as f:
-        f.write(startup_script)
-    
-    print("✅ Web application created successfully!")
-    print(f"\n📁 Files created in: {web_dir}")
-    print("  - app.py (FastAPI application)")
-    print("  - requirements.txt (dependencies)")
-    print("  - start.py (startup script)")
-    
-    print("\n🚀 To start the web application:")
-    print(f"  cd {web_dir}")
-    print("  pip install -r requirements.txt")
-    print("  python start.py")
-    
-    print("\n🌐 Then open your browser to: http://localhost:8000")
-
-if __name__ == "__main__":
-    create_web_app() 

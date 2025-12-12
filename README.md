@@ -1,5 +1,7 @@
 # Sydney Suburb Analyzer 🏠
 
+AI USE CASE - Natural Language Query : User can type their query and AI can interpret and set parameters...
+
 A comprehensive tool to analyze and rank Sydney suburbs based on Points of Interest (POI) data from NSW government open data sources. The system provides personalized suburb recommendations based on user preferences for recreation, community, transport, education, and utility facilities.
 
 ## 🎯 Project Overview
