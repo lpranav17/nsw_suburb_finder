@@ -15,6 +15,9 @@ import pandas as pd
 import json
 import os
 
+# Import NL query router
+from api.routes.nl_query import router as nl_query_router
+
 # Load configuration
 from pathlib import Path
 config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
@@ -55,6 +58,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include NL query router
+app.include_router(nl_query_router)
 
 # Pydantic models
 class PreferenceWeights(BaseModel):
