@@ -31,7 +31,15 @@ else:
     db_config = config.get('database', {})
     db_url = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['name']}"
 
-engine = create_engine(db_url, echo=False)
+try:
+    engine = create_engine(db_url, echo=False)
+    # Test connection
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+except Exception as e:
+    print(f"WARNING: Database connection failed: {e}")
+    print("App will start but database endpoints may not work")
+    engine = None
 
 app = FastAPI(
     title="Sydney Suburb Recommender",
@@ -376,6 +384,8 @@ async def get_recommendations(preferences: PreferenceWeights):
                 ORDER BY total_pois DESC
             """
 
+        if engine is None:
+            raise HTTPException(status_code=503, detail="Database connection not available")
         df = pd.read_sql(query, engine)
         
         if df.empty:
@@ -439,6 +449,8 @@ async def get_stats():
             ORDER BY count DESC
         """
         
+        if engine is None:
+            raise HTTPException(status_code=503, detail="Database connection not available")
         df = pd.read_sql(query, engine)
         
         return {
