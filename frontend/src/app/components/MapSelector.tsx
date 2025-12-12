@@ -46,10 +46,11 @@ function MapBoundsController({ bounds }: MapBoundsControllerProps) {
 interface MapSelectorProps {
   latitude: string;
   longitude: string;
+  radiusKm: number;
   onLocationSelect: (lat: number, lng: number) => void;
 }
 
-export default function MapSelector({ latitude, longitude, onLocationSelect }: MapSelectorProps) {
+export default function MapSelector({ latitude, longitude, radiusKm, onLocationSelect }: MapSelectorProps) {
   const markerRef = useRef<L.Marker>(null);
 
   const handleMapClick = (e: L.LeafletMouseEvent) => {
@@ -88,20 +89,32 @@ export default function MapSelector({ latitude, longitude, onLocationSelect }: M
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         {currentPosition && (
-          <Marker
-            ref={markerRef}
-            position={currentPosition}
-            draggable={true}
-            eventHandlers={{
-              dragend: () => {
-                const marker = markerRef.current;
-                if (marker) {
-                  const position = marker.getLatLng();
-                  onLocationSelect(position.lat, position.lng);
-                }
-              },
-            }}
-          />
+          <>
+            <Circle
+              center={currentPosition}
+              radius={radiusKm * 1000} // Convert km to meters
+              pathOptions={{
+                color: "#3498db",
+                fillColor: "#3498db",
+                fillOpacity: 0.2,
+                weight: 2,
+              }}
+            />
+            <Marker
+              ref={markerRef}
+              position={currentPosition}
+              draggable={true}
+              eventHandlers={{
+                dragend: () => {
+                  const marker = markerRef.current;
+                  if (marker) {
+                    const position = marker.getLatLng();
+                    onLocationSelect(position.lat, position.lng);
+                  }
+                },
+              }}
+            />
+          </>
         )}
         <MapClickHandler onMapClick={handleMapClick} />
       </MapContainer>
