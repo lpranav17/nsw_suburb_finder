@@ -38,7 +38,11 @@
    - Run: `SELECT COUNT(*) FROM poi_data;`
    - Should show ~8,000+ POIs
 
-### Option B: Run on Railway (Alternative)
+### Option B: Run on Railway (Alternative - Only if you didn't run locally)
+
+**Note**: Since you already ran the script locally and populated the database, you can **skip this step**.
+
+If you need to run it on Railway in the future (e.g., for scheduled refreshes):
 
 1. **Install Railway CLI:**
    ```bash
@@ -88,12 +92,16 @@
 
 2. **Environment Variables:**
    - Click "Environment Variables"
-   - Add:
-     ```
-     Name: NEXT_PUBLIC_API_URL
-     Value: https://your-backend.railway.app
-     ```
-   - Replace with your actual Railway backend URL
+   - **If `NEXT_PUBLIC_API_URL` already exists:**
+     - Click on the existing variable
+     - Click "Edit" or the pencil icon
+     - Update the value to: `https://your-backend.railway.app`
+     - Replace with your actual Railway backend URL
+   - **If it doesn't exist:**
+     - Click "Add New"
+     - Name: `NEXT_PUBLIC_API_URL`
+     - Value: `https://your-backend.railway.app`
+     - Replace with your actual Railway backend URL
    - Make sure it's available for "Production", "Preview", and "Development"
 
 3. **Deploy:**

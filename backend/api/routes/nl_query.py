@@ -117,3 +117,4 @@ async def process_nl_query(request: NLQueryRequest):
             status_code=500,
             detail=f"Unexpected error: {str(e)}"
         )
+

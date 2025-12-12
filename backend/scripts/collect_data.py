@@ -257,7 +257,7 @@ def main():
         
         if success:
             print("\n" + "=" * 50)
-            print("✅ Data collection completed!")
+            print("Data collection completed!")
             print("\nDatabase tables created:")
             print("  - poi_data (POIs organized by SA4 regions)")
             
@@ -269,17 +269,17 @@ def main():
             print("\nTo build the web application, run:")
             print("  python create_web_app.py")
         else:
-            print("\n❌ Data collection failed")
+            print("\nData collection failed")
             
     except ImportError as e:
         logger.error(f"Import error: {e}")
-        print(f"\n❌ Import error: {e}")
+        print(f"\nImport error: {e}")
         print("Make sure all required packages are installed:")
         print("  pip install -r requirements.txt")
         
     except Exception as e:
         logger.error(f"Error during data collection: {e}")
-        print(f"\n❌ Error: {e}")
+        print(f"\nError: {e}")
         print("Check the log file 'nsw_data_collection.log' for details")
 
 if __name__ == "__main__":
