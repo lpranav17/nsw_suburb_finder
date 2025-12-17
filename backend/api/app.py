@@ -15,6 +15,14 @@ import pandas as pd
 import json
 import os
 
+# Ensure transformers does not try to import TensorFlow / Flax,
+# which are not needed for sentence-transformers in this app.
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("TRANSFORMERS_NO_FLAX", "1")
+
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
 # Load configuration
 from pathlib import Path
 config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
@@ -41,6 +49,155 @@ except Exception as e:
     print("App will start but database endpoints may not work")
     engine = None
 
+# ---------- Natural language → preference weights (embedding-based) ----------
+
+# Example natural language profiles with hand-tuned weights.
+# These should sum to ~1.0 across the five dimensions.
+EXAMPLE_QUERIES = [
+    {
+        "text": "great for families with young kids, safe and quiet with good schools",
+        "weights": {
+            "recreation": 0.20,
+            "community": 0.30,
+            "transport": 0.15,
+            "education": 0.30,
+            "utility": 0.05,
+        },
+    },
+    {
+        "text": "lots of nightlife, bars and restaurants, great public transport, close to the city",
+        "weights": {
+            "recreation": 0.35,
+            "community": 0.15,
+            "transport": 0.30,
+            "education": 0.10,
+            "utility": 0.10,
+        },
+    },
+    {
+        "text": "budget friendly suburb with basic amenities, okay transport, nothing too fancy",
+        "weights": {
+            "recreation": 0.15,
+            "community": 0.20,
+            "transport": 0.25,
+            "education": 0.15,
+            "utility": 0.25,
+        },
+    },
+    {
+        "text": "quiet area for retirees, close to healthcare and essential services, peaceful community",
+        "weights": {
+            "recreation": 0.15,
+            "community": 0.30,
+            "transport": 0.15,
+            "education": 0.05,
+            "utility": 0.35,
+        },
+    },
+    {
+        "text": "good for students, close to universities and TAFEs, strong public transport",
+        "weights": {
+            "recreation": 0.20,
+            "community": 0.20,
+            "transport": 0.30,
+            "education": 0.25,
+            "utility": 0.05,
+        },
+    },
+    {
+        "text": "balanced lifestyle with parks, decent schools, community feel and good transport options",
+        "weights": {
+            "recreation": 0.25,
+            "community": 0.25,
+            "transport": 0.25,
+            "education": 0.20,
+            "utility": 0.05,
+        },
+    },
+]
+
+_embedding_model: Optional[SentenceTransformer] = None
+_example_embeddings: Optional[np.ndarray] = None
+
+
+def _get_embedding_state() -> tuple[SentenceTransformer, np.ndarray]:
+    """
+    Lazily load the sentence-transformers model and example embeddings.
+    This keeps startup time reasonable and ensures we only load once.
+    """
+    global _embedding_model, _example_embeddings
+
+    if _embedding_model is None:
+        # Small, fast model that runs locally on CPU.
+        _embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        texts = [ex["text"] for ex in EXAMPLE_QUERIES]
+        _example_embeddings = _embedding_model.encode(texts, normalize_embeddings=True)
+
+    # mypy/runtime safety: _example_embeddings will be set with model
+    assert _example_embeddings is not None
+    return _embedding_model, _example_embeddings
+
+
+def infer_weights_from_nl_query(query: str) -> Dict[str, float]:
+    """
+    Given a natural-language description, find the most similar example
+    queries and blend their hand-tuned weights using cosine similarity.
+    """
+    query = (query or "").strip()
+    if not query:
+        # Fall back to existing default weights
+        return {
+            "recreation": 0.25,
+            "community": 0.25,
+            "transport": 0.25,
+            "education": 0.15,
+            "utility": 0.10,
+        }
+
+    model, example_embs = _get_embedding_state()
+
+    # Encode query and compute cosine similarity with example embeddings
+    q_vec = model.encode(query, normalize_embeddings=True)
+    sims = np.dot(example_embs, q_vec)  # shape (N,)
+
+    # Use top-k most similar examples
+    top_k = min(3, len(EXAMPLE_QUERIES))
+    idx = np.argsort(-sims)[:top_k]
+    top_sims = sims[idx]
+
+    # If everything is very dissimilar, fall back to default weights
+    if np.all(top_sims <= 0):
+        return {
+            "recreation": 0.25,
+            "community": 0.25,
+            "transport": 0.25,
+            "education": 0.15,
+            "utility": 0.10,
+        }
+
+    # Normalize similarities to sum to 1
+    weights_norm = top_sims / (top_sims.sum() or 1.0)
+
+    # Blend example weights
+    agg = {
+        "recreation": 0.0,
+        "community": 0.0,
+        "transport": 0.0,
+        "education": 0.0,
+        "utility": 0.0,
+    }
+    for w, i in zip(weights_norm, idx):
+        ex_weights = EXAMPLE_QUERIES[i]["weights"]
+        for key in agg.keys():
+            agg[key] += w * ex_weights[key]
+
+    # Renormalize to sum to 1 exactly (defensive)
+    total = sum(agg.values()) or 1.0
+    for key in agg.keys():
+        agg[key] = float(agg[key] / total)
+
+    return agg
+
 app = FastAPI(
     title="Sydney Suburb Recommender",
     description="Find the best suburb in Sydney based on your preferences",
@@ -55,16 +212,7 @@ if allowed_origins_env:
     for origin in allowed_origins_env.split(','):
         cleaned = origin.strip().rstrip('/')
         if cleaned:
-            # Support wildcard for Vercel preview URLs
-            if cleaned == '*':
-                allowed_origins = ["*"]
-                break
-            # Support pattern matching for Vercel preview domains
-            elif '*.vercel.app' in cleaned or cleaned.endswith('.vercel.app'):
-                # For now, allow all vercel.app subdomains if pattern detected
-                allowed_origins.append(cleaned)
-            else:
-                allowed_origins.append(cleaned)
+            allowed_origins.append(cleaned)
 
 # If no origins specified, allow all (for development)
 if not allowed_origins:
@@ -79,14 +227,6 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-# Health check endpoint for Railway
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for Railway"""
-    return {"status": "ok", "service": "nsw-suburb-finder-backend"}
-
-# NL query router removed - keeping basic structure
-
 # Pydantic models
 class PreferenceWeights(BaseModel):
     recreation: float = 0.25
@@ -98,6 +238,7 @@ class PreferenceWeights(BaseModel):
     longitude: Optional[float] = None
     radius_km: Optional[float] = 5.0
 
+
 class SuburbRecommendation(BaseModel):
     suburb_name: str
     score: float
@@ -105,6 +246,54 @@ class SuburbRecommendation(BaseModel):
     total_pois: int
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+
+
+class NLQueryRequest(BaseModel):
+    """Request body for natural-language suburb search."""
+
+    query: str
+
+
+class NLQueryResponse(BaseModel):
+    """Response for natural-language suburb search."""
+
+    interpreted_preferences: PreferenceWeights
+    recommendations: List[SuburbRecommendation]
+
+
+# Health check endpoint for Railway
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Railway"""
+    return {"status": "ok", "service": "nsw-suburb-finder-backend"}
+
+
+# Natural-language query endpoint (reuses existing recommendation logic)
+@app.post("/api/nl_query", response_model=NLQueryResponse)
+async def nl_query(payload: NLQueryRequest):
+    """
+    Turn a natural-language suburb description into PreferenceWeights
+    using local embeddings, then reuse the standard recommendation logic.
+    """
+    try:
+        if not payload.query or not payload.query.strip():
+            raise HTTPException(status_code=400, detail="Query must not be empty")
+
+        # 1. Infer weights from the free-text query
+        raw_weights = infer_weights_from_nl_query(payload.query)
+        prefs = PreferenceWeights(**raw_weights)
+
+        # 2. Reuse the core recommendation logic
+        recommendations = await get_recommendations(prefs)
+
+        return NLQueryResponse(
+            interpreted_preferences=prefs,
+            recommendations=recommendations,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing NL query: {str(e)}")
 
 @app.get("/", response_class=HTMLResponse)
 async def root():

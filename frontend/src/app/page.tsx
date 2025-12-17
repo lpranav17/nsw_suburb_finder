@@ -1,13 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import dynamic from "next/dynamic";
-
-// Dynamically import map to avoid SSR issues
-const MapSelector = dynamic(() => import("./components/MapSelector"), {
-  ssr: false,
-  loading: () => <div style={{ height: "400px", display: "flex", alignItems: "center", justifyContent: "center", background: "#f0f0f0", borderRadius: "8px" }}>Loading map...</div>,
-});
 
 type PoiCounts = Partial<{
   recreation: number;
@@ -24,6 +17,22 @@ type Recommendation = {
   total_pois: number;
   latitude?: number | null;
   longitude?: number | null;
+};
+
+type PreferenceWeights = {
+  recreation: number;
+  community: number;
+  transport: number;
+  education: number;
+  utility: number;
+  latitude?: number | null;
+  longitude?: number | null;
+  radius_km?: number | null;
+};
+
+type NLQueryResponse = {
+  interpreted_preferences: PreferenceWeights;
+  recommendations: Recommendation[];
 };
 
 const defaultWeights = {
@@ -47,6 +56,9 @@ export default function Home() {
   const [latitude, setLatitude] = useState<string>("");
   const [longitude, setLongitude] = useState<string>("");
   const [radiusKm, setRadiusKm] = useState<number>(5);
+  const [nlQuery, setNlQuery] = useState<string>("");
+  const [nlPrefs, setNlPrefs] = useState<PreferenceWeights | null>(null);
+  const [usingNL, setUsingNL] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<Recommendation[]>([]);
@@ -69,6 +81,8 @@ export default function Home() {
   };
 
   async function fetchRecommendations() {
+    setUsingNL(false);
+    setNlPrefs(null);
     setLoading(true);
     setError(null);
     setResults([]);
@@ -114,6 +128,55 @@ export default function Home() {
     }
   }
 
+  async function fetchRecommendationsFromNL() {
+    if (!nlQuery.trim()) {
+      setError("Please describe what you're looking for.");
+      return;
+    }
+
+    setUsingNL(true);
+    setNlPrefs(null);
+    setLoading(true);
+    setError(null);
+    setResults([]);
+
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+      if (!apiBase) throw new Error("Set NEXT_PUBLIC_API_URL in your environment.");
+
+      const res = await fetch(`${apiBase}/api/nl_query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: nlQuery }),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        let errorMsg = `API ${res.status}: ${txt}`;
+        if (res.status === 0 || res.status === 404) {
+          errorMsg = `Cannot connect to API. Check that NEXT_PUBLIC_API_URL is set correctly. Current: ${apiBase || "NOT SET"}`;
+        } else if (res.status === 500) {
+          errorMsg = `Server error: ${txt}. Check Railway logs.`;
+        } else if (res.status === 403 || res.status === 401) {
+          errorMsg = `CORS or authentication error. Check ALLOWED_ORIGINS in Railway.`;
+        }
+        throw new Error(errorMsg);
+      }
+
+      const data = (await res.json()) as NLQueryResponse;
+      setNlPrefs(data.interpreted_preferences);
+      setResults(data.recommendations);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Request failed");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const handleGeoLocate = () => {
     if (!navigator.geolocation) {
       setError("Geolocation not supported in this browser.");
@@ -147,6 +210,41 @@ export default function Home() {
         <h1>NSW Suburb Finder</h1>
         <p>Rank Sydney suburbs by what matters to you—amenities, transport, community, and more.</p>
       </div>
+
+      <section className="glass-card" style={{ marginTop: 16 }}>
+        <div className="section-title">
+          <span>Describe your ideal suburb</span>
+          <span className="muted">Natural language search (experimental)</span>
+        </div>
+        <div className="grid">
+          <div className="slider-row">
+            <label>
+              <span>Your description</span>
+            </label>
+            <textarea
+              rows={3}
+              value={nlQuery}
+              onChange={(e) => setNlQuery(e.target.value)}
+              placeholder='e.g. "Quiet, family-friendly suburb with good schools and decent public transport near Parramatta."'
+            />
+            <small>
+              We&apos;ll interpret this into weights for recreation, community, transport, education and utilities using a local model.
+            </small>
+            <button className="btn-secondary" onClick={fetchRecommendationsFromNL} type="button" disabled={loading}>
+              {loading && usingNL ? "Searching from description…" : "Search by description"}
+            </button>
+          </div>
+        </div>
+        {nlPrefs && (
+          <div className="stat-wrap" style={{ marginTop: 8 }}>
+            <span className="stat-chip">Recreation {(nlPrefs.recreation * 100).toFixed(0)}%</span>
+            <span className="stat-chip">Community {(nlPrefs.community * 100).toFixed(0)}%</span>
+            <span className="stat-chip">Transport {(nlPrefs.transport * 100).toFixed(0)}%</span>
+            <span className="stat-chip">Education {(nlPrefs.education * 100).toFixed(0)}%</span>
+            <span className="stat-chip">Utilities {(nlPrefs.utility * 100).toFixed(0)}%</span>
+          </div>
+        )}
+      </section>
 
       <section className="glass-card">
         <div className="section-title">
@@ -206,20 +304,6 @@ export default function Home() {
               Use my location
             </button>
           </div>
-          <div style={{ marginTop: "12px" }}>
-            <MapSelector
-              latitude={latitude}
-              longitude={longitude}
-              radiusKm={radiusKm}
-              onLocationSelect={(lat, lng) => {
-                setLatitude(lat.toFixed(6));
-                setLongitude(lng.toFixed(6));
-              }}
-            />
-            <small style={{ display: "block", marginTop: "8px", color: "#666" }}>
-              Click on the map or drag the marker to select a location in Sydney
-            </small>
-          </div>
           <div className="slider-row">
             <label>
               <span>Search radius</span>
@@ -254,7 +338,9 @@ export default function Home() {
       <section className="glass-card" style={{ marginTop: 20 }}>
         <div className="section-title">
           <span>Top matches</span>
-          <span className="muted">Live data from your FastAPI backend</span>
+          <span className="muted">
+            {usingNL ? "Interpreted from your description via FastAPI backend" : "Live data from your FastAPI backend"}
+          </span>
         </div>
 
         {loading ? (

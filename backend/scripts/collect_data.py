@@ -10,8 +10,8 @@ import logging
 import time
 from pathlib import Path
 
-# Add backend to path
-sys.path.append(str(Path(__file__).parent.parent))
+# Add src to path
+sys.path.append(str(Path(__file__).parent / "src"))
 
 def setup_logging():
     """Setup logging configuration"""
@@ -35,8 +35,7 @@ def collect_pois_by_sa4():
     print("Creating SA4-based POI collector for Greater Sydney GCC...")
     
     # Load config
-    config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
-    with open(config_path, 'r') as f:
+    with open('config/config.yaml', 'r') as f:
         config = yaml.safe_load(f)
     
     # Setup database connection (prefer DATABASE_URL env var for cloud providers like Neon)
@@ -257,7 +256,7 @@ def main():
         
         if success:
             print("\n" + "=" * 50)
-            print("Data collection completed!")
+            print("✅ Data collection completed!")
             print("\nDatabase tables created:")
             print("  - poi_data (POIs organized by SA4 regions)")
             
@@ -269,17 +268,17 @@ def main():
             print("\nTo build the web application, run:")
             print("  python create_web_app.py")
         else:
-            print("\nData collection failed")
+            print("\n❌ Data collection failed")
             
     except ImportError as e:
         logger.error(f"Import error: {e}")
-        print(f"\nImport error: {e}")
+        print(f"\n❌ Import error: {e}")
         print("Make sure all required packages are installed:")
         print("  pip install -r requirements.txt")
         
     except Exception as e:
         logger.error(f"Error during data collection: {e}")
-        print(f"\nError: {e}")
+        print(f"\n❌ Error: {e}")
         print("Check the log file 'nsw_data_collection.log' for details")
 
 if __name__ == "__main__":
