@@ -21,7 +21,13 @@ os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("TRANSFORMERS_NO_FLAX", "1")
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+try:
+    from sentence_transformers import SentenceTransformer  # type: ignore
+    _HAS_SENTENCE_TRANSFORMERS = True
+except Exception:  # ModuleNotFoundError or any other import issue
+    SentenceTransformer = None  # type: ignore
+    _HAS_SENTENCE_TRANSFORMERS = False
 
 # Load configuration
 from pathlib import Path
@@ -49,9 +55,18 @@ except Exception as e:
     print("App will start but database endpoints may not work")
     engine = None
 
-# ---------- Natural language → preference weights (embedding-based) ----------
+# ---------- Natural language → preference weights (embedding + keyword fallback) ----------
 
-# Example natural language profiles with hand-tuned weights.
+# Default weights if we can't infer anything better
+DEFAULT_WEIGHTS: Dict[str, float] = {
+    "recreation": 0.25,
+    "community": 0.25,
+    "transport": 0.25,
+    "education": 0.15,
+    "utility": 0.10,
+}
+
+# Example natural language profiles with hand-tuned weights (for embedding-based mode).
 # These should sum to ~1.0 across the five dimensions.
 EXAMPLE_QUERIES = [
     {
@@ -116,87 +131,185 @@ EXAMPLE_QUERIES = [
     },
 ]
 
-_embedding_model: Optional[SentenceTransformer] = None
+_embedding_model: Optional[object] = None
 _example_embeddings: Optional[np.ndarray] = None
 
 
-def _get_embedding_state() -> tuple[SentenceTransformer, np.ndarray]:
+def _get_embedding_state() -> tuple[object, np.ndarray]:
     """
     Lazily load the sentence-transformers model and example embeddings.
     This keeps startup time reasonable and ensures we only load once.
     """
     global _embedding_model, _example_embeddings
 
+    if not _HAS_SENTENCE_TRANSFORMERS:
+        raise RuntimeError("sentence-transformers library is not available")
+
     if _embedding_model is None:
-        # Small, fast model that runs locally on CPU.
-        _embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        # Small, fast model that runs locally on CPU (when available).
+        _embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")  # type: ignore
         texts = [ex["text"] for ex in EXAMPLE_QUERIES]
-        _example_embeddings = _embedding_model.encode(texts, normalize_embeddings=True)
+        _example_embeddings = _embedding_model.encode(texts, normalize_embeddings=True)  # type: ignore
 
     # mypy/runtime safety: _example_embeddings will be set with model
     assert _example_embeddings is not None
     return _embedding_model, _example_embeddings
 
 
+FALLBACK_KEYWORDS: Dict[str, List[str]] = {
+    "recreation": [
+        "park",
+        "parks",
+        "beach",
+        "beaches",
+        "sports",
+        "gym",
+        "pool",
+        "playground",
+        "green space",
+        "nature",
+        "outdoors",
+        "recreation",
+        "nightlife",
+        "bars",
+        "restaurants",
+    ],
+    "community": [
+        "community",
+        "family",
+        "family-friendly",
+        "families",
+        "kids",
+        "safe",
+        "quiet",
+        "peaceful",
+        "neighbourly",
+        "neighborhood",
+        "village",
+        "local vibe",
+        "community centre",
+        "community center",
+        "library",
+    ],
+    "transport": [
+        "transport",
+        "public transport",
+        "train",
+        "station",
+        "bus",
+        "metro",
+        "light rail",
+        "tram",
+        "easy commute",
+        "close to city",
+        "near cbd",
+        "good transport",
+        "strong transport",
+    ],
+    "education": [
+        "school",
+        "schools",
+        "good schools",
+        "education",
+        "university",
+        "uni",
+        "college",
+        "tafes",
+        "students",
+        "student",
+        "children's education",
+    ],
+    "utility": [
+        "shopping",
+        "shops",
+        "supermarket",
+        "mall",
+        "services",
+        "hospital",
+        "clinic",
+        "doctor",
+        "healthcare",
+        "infrastructure",
+        "amenities",
+        "essential services",
+    ],
+}
+
+
+def _infer_weights_keyword(query: str) -> Dict[str, float]:
+    """Fallback rule-based mapper from text to weights using simple keyword counts."""
+    text = (query or "").strip().lower()
+    if not text:
+        return DEFAULT_WEIGHTS.copy()
+
+    scores: Dict[str, float] = {k: 0.0 for k in DEFAULT_WEIGHTS.keys()}
+    for category, words in FALLBACK_KEYWORDS.items():
+        for w in words:
+            if w in text:
+                scores[category] += 1.0
+
+    if all(v == 0.0 for v in scores.values()):
+        return DEFAULT_WEIGHTS.copy()
+
+    total = sum(scores.values()) or 1.0
+    return {k: float(v / total) for k, v in scores.items()}
+
+
 def infer_weights_from_nl_query(query: str) -> Dict[str, float]:
     """
-    Given a natural-language description, find the most similar example
-    queries and blend their hand-tuned weights using cosine similarity.
+    Given a natural-language description, prefer the embedding-based
+    interpretation when sentence-transformers is available; otherwise,
+    fall back to the lightweight keyword-based mapping.
     """
     query = (query or "").strip()
     if not query:
-        # Fall back to existing default weights
-        return {
-            "recreation": 0.25,
-            "community": 0.25,
-            "transport": 0.25,
-            "education": 0.15,
-            "utility": 0.10,
+        return DEFAULT_WEIGHTS.copy()
+
+    # If we don't have sentence-transformers (e.g. on Railway), use keyword rules.
+    if not _HAS_SENTENCE_TRANSFORMERS:
+        return _infer_weights_keyword(query)
+
+    try:
+        model, example_embs = _get_embedding_state()
+
+        # Encode query and compute cosine similarity with example embeddings
+        q_vec = model.encode(query, normalize_embeddings=True)  # type: ignore
+        sims = np.dot(example_embs, q_vec)  # shape (N,)
+
+        # Use top-k most similar examples
+        top_k = min(3, len(EXAMPLE_QUERIES))
+        idx = np.argsort(-sims)[:top_k]
+        top_sims = sims[idx]
+
+        # If everything is very dissimilar, fall back to keyword/default behavior
+        if np.all(top_sims <= 0):
+            return _infer_weights_keyword(query)
+
+        # Normalize similarities to sum to 1
+        weights_norm = top_sims / (top_sims.sum() or 1.0)
+
+        # Blend example weights
+        agg = {
+            "recreation": 0.0,
+            "community": 0.0,
+            "transport": 0.0,
+            "education": 0.0,
+            "utility": 0.0,
         }
+        for w, i in zip(weights_norm, idx):
+            ex_weights = EXAMPLE_QUERIES[i]["weights"]
+            for key in agg.keys():
+                agg[key] += w * ex_weights[key]
 
-    model, example_embs = _get_embedding_state()
-
-    # Encode query and compute cosine similarity with example embeddings
-    q_vec = model.encode(query, normalize_embeddings=True)
-    sims = np.dot(example_embs, q_vec)  # shape (N,)
-
-    # Use top-k most similar examples
-    top_k = min(3, len(EXAMPLE_QUERIES))
-    idx = np.argsort(-sims)[:top_k]
-    top_sims = sims[idx]
-
-    # If everything is very dissimilar, fall back to default weights
-    if np.all(top_sims <= 0):
-        return {
-            "recreation": 0.25,
-            "community": 0.25,
-            "transport": 0.25,
-            "education": 0.15,
-            "utility": 0.10,
-        }
-
-    # Normalize similarities to sum to 1
-    weights_norm = top_sims / (top_sims.sum() or 1.0)
-
-    # Blend example weights
-    agg = {
-        "recreation": 0.0,
-        "community": 0.0,
-        "transport": 0.0,
-        "education": 0.0,
-        "utility": 0.0,
-    }
-    for w, i in zip(weights_norm, idx):
-        ex_weights = EXAMPLE_QUERIES[i]["weights"]
+        # Renormalize to sum to 1 exactly (defensive)
+        total = sum(agg.values()) or 1.0
         for key in agg.keys():
-            agg[key] += w * ex_weights[key]
+            agg[key] = float(agg[key] / total)
 
-    # Renormalize to sum to 1 exactly (defensive)
-    total = sum(agg.values()) or 1.0
-    for key in agg.keys():
-        agg[key] = float(agg[key] / total)
-
-    return agg
+        return agg
+    except Exception:
+        # If anything goes wrong with the embedding path, degrade gracefully.
+        return _infer_weights_keyword(query)
 
 app = FastAPI(
     title="Sydney Suburb Recommender",
