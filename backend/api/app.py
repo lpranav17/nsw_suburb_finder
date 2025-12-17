@@ -340,6 +340,39 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+# Pydantic models
+class PreferenceWeights(BaseModel):
+    recreation: float = 0.25
+    community: float = 0.25
+    transport: float = 0.25
+    education: float = 0.15
+    utility: float = 0.10
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    radius_km: Optional[float] = 5.0
+
+
+class SuburbRecommendation(BaseModel):
+    suburb_name: str
+    score: float
+    poi_counts: Dict[str, int]
+    total_pois: int
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
+class NLQueryRequest(BaseModel):
+    """Request body for natural-language suburb search."""
+
+    query: str
+
+
+class NLQueryResponse(BaseModel):
+    """Response for natural-language suburb search."""
+
+    interpreted_preferences: PreferenceWeights
+    recommendations: List[SuburbRecommendation]
+
 # Health check endpoint for Railway
 @app.get("/health")
 async def health_check():
@@ -372,38 +405,6 @@ async def nl_query(payload: NLQueryRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing NL query: {str(e)}")
-
-# Pydantic models
-class PreferenceWeights(BaseModel):
-    recreation: float = 0.25
-    community: float = 0.25
-    transport: float = 0.25
-    education: float = 0.15
-    utility: float = 0.10
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    radius_km: Optional[float] = 5.0
-
-class SuburbRecommendation(BaseModel):
-    suburb_name: str
-    score: float
-    poi_counts: Dict[str, int]
-    total_pois: int
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-
-
-class NLQueryRequest(BaseModel):
-    """Request body for natural-language suburb search."""
-
-    query: str
-
-
-class NLQueryResponse(BaseModel):
-    """Response for natural-language suburb search."""
-
-    interpreted_preferences: PreferenceWeights
-    recommendations: List[SuburbRecommendation]
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
